@@ -22,6 +22,8 @@ try:
 except ImportError:
     import unittest
 
+import threading
+import time
 
 from rhsmlib.utils import Singleton, no_reinitialization
 
@@ -69,17 +71,41 @@ class Kid(Singleton):
         self.bar = bar
 
 
+class SpoiledChild(Singleton):
+    """
+    Another class used for testing proper unlocking of singleton, when
+    __init__ method raises some exception.
+    """
+
+    @no_reinitialization
+    def __init__(self):
+        raise Exception
+
+
 class SingletonTestCase(unittest.TestCase):
+
+    @staticmethod
+    def _reset_singleton(clazz):
+        """
+        Method for resetting class
+        :param clazz: class to be reseted
+        :return: None
+        """
+        clazz._instance = None
+        clazz._initialized = False
+        clazz._lock = None
 
     def setUp(self):
         """
         This method all singleton instances before each test
         """
-        Singleton._instance = None
-        Child._instance = None
-        GrandSon._instance = None
-        GrandDaughter._instance = None
-        Kid._instance = None
+        # Add here every child of Singleton to be deleted before each test
+        self._reset_singleton(Singleton)
+        self._reset_singleton(Child)
+        self._reset_singleton(GrandSon)
+        self._reset_singleton(GrandDaughter)
+        self._reset_singleton(Kid)
+        self._reset_singleton(SpoiledChild)
 
     def test_is_singleton(self):
         """
@@ -94,7 +120,15 @@ class SingletonTestCase(unittest.TestCase):
         Test of singleton and child of singleton
 
         """
+        # First create parent to be sure that parent do not influence sub-classes
         s = Singleton()
+
+        # Do asserts of sub-class
+        self.assertEqual(Child._instance, None)
+        self.assertEqual(Child._initialized, False)
+        self.assertEqual(Child._lock, None)
+
+        # Do own tests of sub-class
         ch1 = Child()
         ch2 = Child()
         self.assertNotEqual(id(s), id(ch1))
@@ -104,9 +138,16 @@ class SingletonTestCase(unittest.TestCase):
         """
         Test that instance of class is initialized
         """
+        self.assertEqual(Child._instance, None)
+        self.assertEqual(Child._initialized, False)
+        self.assertEqual(Child._lock, None)
+
         ch = Child("foo", bar="bar")
+
         self.assertEqual(ch.bar, "bar")
         self.assertEqual(ch.foo, "foo")
+        self.assertEqual(ch._initialized, True)
+        self.assertIsNotNone(ch._lock)
 
     def test_another_child_is_not_reinitialized(self):
         """
@@ -163,3 +204,49 @@ class SingletonTestCase(unittest.TestCase):
         # This singleton should have new values
         self.assertEqual(kid2.foo, "FOO")
         self.assertEqual(kid2.bar, "BAR")
+
+    def test_release_lock_after_exception_in_init(self):
+        """
+        Test proper releasing of singleton, when __init__ method is not implemented
+        as expected (it raises some exception)
+        """
+        # Capture exception
+        self.assertRaises(Exception, SpoiledChild)
+
+        # Test that it was initialized despite exception
+        self.assertIsNotNone(SpoiledChild._instance)
+        self.assertEqual(SpoiledChild._instance._initialized, True)
+        spoiled_child_id = id(SpoiledChild._instance)
+
+        # Test that another calling of SpoiledChild is not destructive
+        spoiled_child = SpoiledChild()
+        self.assertEqual(id(spoiled_child), spoiled_child_id)
+
+    def test_signleton_and_treading(self):
+        """
+        Test creating singletons in two threads
+        """
+
+        def thread_function(foo, bar):
+            """
+            Dummy thread function for testing singleton
+            :param foo: foo argument
+            :param bar: bar argument
+            :return: None
+            """
+            Child(foo=foo, bar=bar)
+            time.sleep(0.3)
+
+        thread01 = threading.Thread(target=thread_function, args=("foo", "bar"))
+        thread01.start()
+        time.sleep(0.1)
+        thread02 = threading.Thread(target=thread_function, args=("FOO", "BAR"))
+        thread02.start()
+        time.sleep(0.1)
+        thread01.join()
+        thread02.join()
+
+        # Create testing singleton
+        test_child = Child()
+        self.assertEqual(test_child.bar, "bar")
+        self.assertEqual(test_child.foo, "foo")

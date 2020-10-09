@@ -19,21 +19,40 @@ applications.
 """
 
 
+import threading
+
+
 def no_reinitialization(init_method):
     """
     Decorator of singleton __init__ method. When the __init__ method will be wrapped using
     this decorator, then the __init__ method will be called only once, when the first instance
     is created.
-    :param init_method:
+    :param init_method: the __init__ method of singleton object
     :return: wrapper function
     """
 
     def wrapper(*args, **kwargs):
         if len(args) > 0:
             self = args[0]
-            if hasattr(self, "_initialized") and self._initialized is False:
+
+            # Using this wrapper with something else will cause exception
+            assert hasattr(self, "_initialized") is True, \
+                "The {cls} does not include _initialized attribute".format(cls=self.__class__)
+            assert hasattr(self, '_lock') is True, \
+                "The {cls} does not include _lock attribute".format(cls=self.__class__)
+
+            # When we know that the object contains _lock, then we can lock it
+            self._lock.acquire(blocking=True)
+
+            # Encapsulate init method in try-finally statement, because anything can
+            # happen in the init_method
+            try:
+                if self._initialized is True:
+                    return
                 init_method(*args, **kwargs)
+            finally:
                 self._initialized = True
+                self._lock.release()
         else:
             raise AssertionError("The wrapper method was called without any argument")
 
@@ -56,12 +75,19 @@ class Singleton(object):
     _instance = None
     _initialized = False
 
+    _lock = None
+
     def __new__(cls, *args, **kwargs):
         """
         Function called, when new instance of Singleton is requested
         """
+        if cls._lock is None:
+            cls._lock = threading.RLock()
+
+        cls._lock.acquire(blocking=True)
         if not isinstance(cls._instance, cls):
             # When there is not existing instance, then create first one
             cls._instance = object.__new__(cls)
+        cls._lock.release()
 
         return cls._instance
