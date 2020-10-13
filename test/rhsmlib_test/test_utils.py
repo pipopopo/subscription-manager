@@ -34,8 +34,28 @@ class Child(Singleton):
     """
     @no_reinitialization
     def __init__(self, foo=None, bar=None):
-        self.foo = foo
-        self.bar = bar
+        self._foo = foo
+        self._bar = bar
+
+    @property
+    def foo(self):
+        with self:
+            return self._foo
+
+    @foo.setter
+    def foo(self, value):
+        with self:
+            self._foo = value
+
+    @property
+    def bar(self):
+        with self:
+            return self._bar
+
+    @bar.setter
+    def bar(self, value):
+        with self:
+            self._bar = value
 
 
 class GrandSon(Child):
@@ -114,6 +134,40 @@ class SingletonTestCase(unittest.TestCase):
         s1 = Singleton()
         s2 = Singleton()
         self.assertEqual(id(s1), id(s2))
+
+    def test_simple_locking_and_unlocking(self):
+        """
+        Test simple locking and unlocking using lock() and unlock()
+        """
+        s = Singleton()
+        # Note: the s._lock._is_owned() should not be used in production, because
+        # _lock and _is_owned are not part of public API. It is used here only for
+        # testing purpose
+        self.assertEqual(s._lock._is_owned(), False)
+        s.lock()
+        self.assertEqual(s._lock._is_owned(), True)
+        s.unlock()
+        self.assertEqual(s._lock._is_owned(), False)
+
+    def test_unlocking_of_not_locked_lock(self):
+        """
+        Test that exception is not raised, when we try to unlock not locked lock
+        """
+        s = Singleton()
+        s.unlock()
+        # Note: the s._lock._is_owned() should not be used in production, because
+        # _lock and _is_owned are not part of public API. It is used here only for
+        # testing purpose
+        self.assertEqual(s._lock._is_owned(), False)
+
+    def test_locking_using_enter_exit(self):
+        """
+        Simple test of locking using with statement
+        """
+        with Singleton() as s:
+            self.assertEqual(s._lock._is_owned(), True)
+        s = Singleton()
+        self.assertEqual(s._lock._is_owned(), False)
 
     def test_is_subclass_singleton(self):
         """
@@ -222,7 +276,7 @@ class SingletonTestCase(unittest.TestCase):
         spoiled_child = SpoiledChild()
         self.assertEqual(id(spoiled_child), spoiled_child_id)
 
-    def test_signleton_and_treading(self):
+    def test_singleton_and_threading(self):
         """
         Test creating singletons in two threads
         """
@@ -250,3 +304,40 @@ class SingletonTestCase(unittest.TestCase):
         test_child = Child()
         self.assertEqual(test_child.bar, "bar")
         self.assertEqual(test_child.foo, "foo")
+
+    def test_singleton_threading_and_locking(self):
+        """
+        Test creating singletons in two threads and locking of singleton
+        """
+
+        def thread_function(foo, bar):
+            """
+            Dummy thread function for testing singleton
+            :param foo: foo argument
+            :param bar: bar argument
+            :return: None
+            """
+            with Child() as child:
+                child.foo = foo
+                child.bar = bar
+                time.sleep(0.3)
+
+        # Create testing singleton
+        test_child = Child()
+
+        thread01 = threading.Thread(target=thread_function, args=("foo", "bar"))
+        thread01.start()
+        time.sleep(0.1)
+
+        self.assertEqual(test_child.bar, "bar")
+        self.assertEqual(test_child.foo, "foo")
+
+        thread02 = threading.Thread(target=thread_function, args=("FOO", "BAR"))
+        thread02.start()
+        time.sleep(0.1)
+
+        self.assertEqual(test_child.bar, "BAR")
+        self.assertEqual(test_child.foo, "FOO")
+
+        thread01.join()
+        thread02.join()

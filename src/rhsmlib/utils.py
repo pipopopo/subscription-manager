@@ -71,6 +71,26 @@ class Singleton(object):
 
     The behavior of singleton without using @no_reinitialization is usually not desired,
     because __init__() would re-initialize instance of singleton everytime it is called.
+
+    When singleton is used in application using thread, then you can lock the object using
+    two different methods. First recommended method is using with statement, because
+    Singleton has __enter__ and __exit__ methods implemented and instance of RLock is
+    acquired and released there. You can use something like this:
+
+    with Singleton() as singleton:
+        print(singleton._lock._is_owner())
+
+    You can also use manual locking, but it use it carefully, because you can easily
+    cause deadlock. It is recommended to use at least try-finally statement:
+
+    singleton = Singleton()
+    singleton.lock()
+    try:
+        print(singleton._lock._is_owner())
+    finally:
+        singleton.unlock()
+
+    The unlock() method can handle gracefully the situation, when the lock is not locked.
     """
     _instance = None
     _initialized = False
@@ -91,3 +111,42 @@ class Singleton(object):
         cls._lock.release()
 
         return cls._instance
+
+    def lock(self):
+        """
+        Lock the sender using RLock. Thus one thread can lock acquire this lock several times,
+        but other threads can not acquire this lock until the lock is completely unlocked.
+        :return: None
+        """
+        self._lock.acquire()
+
+    def unlock(self):
+        """
+        Try to unlock the RLock.
+        :return: None
+        """
+        try:
+            self._lock.release()
+        except RuntimeError:
+            # When the lock is not acquired, then attempt of releasing raises this exception
+            # The lock has method _is_owner(), but it is not intended for using outside threading
+            # package.
+            pass
+
+    def __enter__(self):
+        """
+        When using: `with dbus_sender:` lock the sender at the beginning
+        :return: None
+        """
+        self.lock()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """
+        When using `with dbus_sender:` unlock the sender at the end
+        :param exc_type: Exception type
+        :param exc_val: Exception value
+        :param exc_tb: Traceback of exception
+        :return: None
+        """
+        self.unlock()

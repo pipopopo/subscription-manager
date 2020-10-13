@@ -21,6 +21,7 @@ import dbus.service
 
 from rhsmlib.dbus import constants, exceptions, dbus_utils, base_object, server, util
 from rhsmlib.services.register import RegisterService
+from rhsmlib.client_info import DBusSender
 
 from subscription_manager.i18n import Locale
 from subscription_manager.i18n import ugettext as _
@@ -55,7 +56,7 @@ class RegisterDBusObject(base_object.BaseObject):
                 return self.server.address
 
             log.debug('Attempting to create new domain socket server')
-            cmd_line = util.dbus_get_sender_cmd_line(sender)
+            cmd_line = DBusSender.get_cmd_line(sender)
             self.server = server.DomainSocketServer(
                 object_classes=[DomainSocketRegisterDBusObject],
                 sender=sender,
@@ -152,13 +153,12 @@ class DomainSocketRegisterDBusObject(base_object.BaseObject):
         connection_options['password'] = dbus_utils.dbus_to_python(password, expected_type=str)
         locale = dbus_utils.dbus_to_python(locale, expected_type=str)
 
-        util.dbus_set_sender_cmd_line(sender=self.sender, cmd_line=self.cmd_line)
-        try:
+        with DBusSender() as dbus_sender:
+            dbus_sender.set_cmd_line(sender=self.sender, cmd_line=self.cmd_line)
             Locale.set(locale)
             cp = self.build_uep(connection_options, basic_auth_method=True)
             owners = cp.getOwnerList(connection_options['username'])
-        finally:
-            util.dbus_reset_sender_cmd_line()
+            dbus_sender.reset_cmd_line()
 
         return json.dumps(owners)
 
@@ -231,8 +231,8 @@ class DomainSocketRegisterDBusObject(base_object.BaseObject):
         options = dbus_utils.dbus_to_python(options, expected_type=dict)
         locale = dbus_utils.dbus_to_python(locale, expected_type=str)
 
-        util.dbus_set_sender_cmd_line(sender=self.sender, cmd_line=self.cmd_line)
-        try:
+        with DBusSender() as dbus_sender:
+            dbus_sender.set_cmd_line(sender=self.sender, cmd_line=self.cmd_line)
             Locale.set(locale)
             cp = self.build_uep(connection_options)
 
@@ -253,8 +253,7 @@ class DomainSocketRegisterDBusObject(base_object.BaseObject):
                 raise OrgNotSpecifiedException(username=connection_options['username'])
 
             consumer = register_service.register(org, **options)
-        finally:
-            util.dbus_reset_sender_cmd_line()
+            dbus_sender.reset_cmd_line()
 
         return json.dumps(consumer)
 
@@ -273,8 +272,8 @@ class DomainSocketRegisterDBusObject(base_object.BaseObject):
         org = dbus_utils.dbus_to_python(org, expected_type=str)
         locale = dbus_utils.dbus_to_python(locale, expected_type=str)
 
-        util.dbus_set_sender_cmd_line(sender=self.sender, cmd_line=self.cmd_line)
-        try:
+        with DBusSender() as dbus_sender:
+            dbus_sender.set_cmd_line(sender=self.sender, cmd_line=self.cmd_line)
             Locale.set(locale)
             cp = self.build_uep(connection_options)
 
@@ -284,7 +283,6 @@ class DomainSocketRegisterDBusObject(base_object.BaseObject):
             log.debug("System registered, updating entitlements if needed")
             entcertlib = EntCertActionInvoker()
             entcertlib.update()
-        finally:
-            util.dbus_reset_sender_cmd_line()
+            dbus_sender.reset_cmd_line()
 
         return json.dumps(consumer)
